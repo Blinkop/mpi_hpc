@@ -14,10 +14,10 @@ namespace
 
     void log_time(int message_size, long long time, const std::string& filename)
     {
-        // std::ofstream outfile;
+        std::ofstream outfile;
 
-        // outfile.open(filename, std::ios::app);
-        // outfile << std::to_string(message_size) << std::to_string(time) << std::endl;
+        outfile.open(filename, std::ios::app);
+        outfile << std::to_string(message_size) << "," << std::to_string(time) << std::endl;
     }
 
     void task_send(int world_rank)
@@ -52,7 +52,8 @@ namespace
             auto end = std::chrono::system_clock::now();
             auto t = (end - start).count();
 
-            log_time(s, t, "send.csv");
+            if (world_rank == 0)
+                log_time(s, t, "send.csv");
 
             if (world_rank == 0)
             {
@@ -95,7 +96,8 @@ namespace
             auto end = std::chrono::system_clock::now();
             auto t = (end - start).count();
 
-            log_time(s, t, "ssend.csv");
+            if (world_rank == 0)
+                log_time(s, t, "ssend.csv");
 
             if (world_rank == 0)
             {
@@ -143,7 +145,8 @@ namespace
             auto end = std::chrono::system_clock::now();
             auto t = (end - start).count();
 
-            log_time(s, t, "bsend.csv");
+            if (world_rank == 0)
+                log_time(s, t, "bsend.csv");
 
             if (world_rank == 0)
             {
@@ -190,7 +193,93 @@ namespace
             auto end = std::chrono::system_clock::now();
             auto t = (end - start).count();
 
-            log_time(s, t, "rsend.csv");
+            if (world_rank == 0)
+                log_time(s, t, "rsend.csv");
+
+            if (world_rank == 0)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::cout << "Excecuted " << NUM_CYCLES << " cycles with n = " << s
+                        << ". System clock: " << t << std::endl;
+            }
+        }
+    }
+
+    void task_isend(int world_rank)
+    {
+        char message[MESSAGE_SIZE_MAX];
+        for (uint64_t i = 0; i < MESSAGE_SIZE_MAX; i++)
+            message[i] = i % __SCHAR_MAX__;
+
+        for (auto s = MESSAGE_SIZE; s <= MESSAGE_SIZE_MAX; s += MESSAGE_SIZE)
+        {
+            bool zero_send = true;
+            auto start = std::chrono::system_clock::now();
+            for (auto i = 0; i < NUM_CYCLES; i++)
+            {
+                MPI_Request request;
+                MPI_Status status;
+                int request_complete = 0;
+
+                if (world_rank == 0)
+                {
+                    if (zero_send)
+                        MPI_Isend(message, s, MPI_BYTE, 1, i, MPI_COMM_WORLD, &request);
+                    else
+                    {
+                        MPI_Irecv(message, s, MPI_BYTE, 1, i, MPI_COMM_WORLD, &request);
+                        MPI_Wait(&request, &status);
+                    }
+                }
+                else if (world_rank == 1)
+                {
+                    if (!zero_send)
+                        MPI_Isend(message, s, MPI_BYTE, 0, i, MPI_COMM_WORLD, &request);
+                    else
+                    {
+                        MPI_Irecv(message, s, MPI_BYTE, 0, i, MPI_COMM_WORLD, &request);
+                        MPI_Wait(&request, &status);
+                    }
+                }
+
+                zero_send = !zero_send;
+            }
+            auto end = std::chrono::system_clock::now();
+            auto t = (end - start).count();
+
+            if (world_rank == 0)
+                log_time(s, t, "isend.csv");
+
+            if (world_rank == 0)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::cout << "Excecuted " << NUM_CYCLES << " cycles with n = " << s
+                        << ". System clock: " << t << std::endl;
+            }
+        }
+    }
+
+    void task_send_recv(int world_rank)
+    {
+        char message[MESSAGE_SIZE_MAX];
+        for (uint64_t i = 0; i < MESSAGE_SIZE_MAX; i++)
+            message[i] = i % __SCHAR_MAX__;
+
+        for (auto s = MESSAGE_SIZE; s <= MESSAGE_SIZE_MAX; s += MESSAGE_SIZE)
+        {
+            auto start = std::chrono::system_clock::now();
+            for (auto i = 0; i < NUM_CYCLES / 2; i++)
+            {
+                if (world_rank == 0)
+                    MPI_Sendrecv(message, s, MPI_BYTE, 1, 0, message, s, MPI_BYTE, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                else if (world_rank == 1)
+                    MPI_Sendrecv(message, s, MPI_BYTE, 0, 0, message, s, MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            }
+            auto end = std::chrono::system_clock::now();
+            auto t = (end - start).count();
+
+            if (world_rank == 0)
+                log_time(s, t, "sendrecv.csv");
 
             if (world_rank == 0)
             {
@@ -227,6 +316,14 @@ int main(int argc, char* argv[])
     if (world_rank == 0)
         std::cout << "----------Rsend----------" << std::endl;
     task_rsend(world_rank);
+
+    if (world_rank == 0)
+        std::cout << "----------Non-block----------" << std::endl;
+    task_isend(world_rank);
+
+    if (world_rank == 0)
+        std::cout << "----------Send-Receive----------" << std::endl;
+    task_send_recv(world_rank);
 
     MPI_Finalize();
 
